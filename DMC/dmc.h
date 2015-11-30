@@ -11,6 +11,7 @@
 
 #include <cassert>
 #include <vector>
+#include <cmath>
 #include <algorithm>
 #include <iostream>
 #include <bitset>
@@ -19,6 +20,11 @@
 
 namespace dmc
 {
+    
+#ifndef M_PI
+# define M_PI 3.14159265358979323846
+#endif
+    
     using namespace utils;
     
     typedef utils::Array3D<float> scalar_grid_type;
@@ -29,7 +35,8 @@ namespace dmc
     
     typedef uint8_t voxel_config_type;
     typedef unsigned voxel_index1D_type;
-    typedef uint8_t vertex_index_type;
+    typedef uint8_t iso_vertex_m_type;
+    typedef unsigned vertex_index_type;
     typedef unsigned char flag_type;
     
     const unsigned INVALID_UINT8 = 0xff;
@@ -43,11 +50,11 @@ namespace dmc
     const voxel_index1D_type INVALID_INDEX_1D = INVALID_UINT32;
     const voxel_config_type MAX_VOXEL_CONFIG_MASK = INVALID_UINT8;
     // Used in config_edge_lut1[2]
-    const vertex_index_type NO_VERTEX = INVALID_UINT8;
+    const iso_vertex_m_type NO_VERTEX = INVALID_UINT8;
     
     // For each voxel config and an edge index, return the associated iso vertex in DMC.
     // This is LUT 1. Voxel with 3B config with its adjacent voxel being 2B config CANNOT use this LUT.
-    const vertex_index_type config_edge_lut1[256][VOXEL_NUM_EDGES] =
+    const iso_vertex_m_type config_edge_lut1[256][VOXEL_NUM_EDGES] =
     {
         { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff },
         { 0, 0xff, 0xff, 0, 0, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff },
@@ -308,7 +315,7 @@ namespace dmc
     };
     // Number of iso vertices for DMC for each voxel config, this is LUT_1.
     // Voxel with 3B config with its adjacent voxel being 2B config CANNOT use this LUT.
-    const unsigned num_vertex_lut1[256] =
+    const uint8_t num_vertex_lut1[256] =
     {
         0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
         1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 2, 1, 1, 1, 2, 1,
@@ -328,7 +335,7 @@ namespace dmc
         1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 2, 1, 1, 1, 1, 0
     };
     
-    const vertex_index_type config_edge_lut2[256][VOXEL_NUM_EDGES] =
+    const iso_vertex_m_type config_edge_lut2[256][VOXEL_NUM_EDGES] =
     {
         { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff },
         { 0, 0xff, 0xff, 0, 0, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff },
@@ -588,7 +595,7 @@ namespace dmc
         { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff }
     };
     
-    const unsigned num_vertex_lut2[256] =
+    const uint8_t num_vertex_lut2[256] =
     {
         0, 1, 1, 1, 1, 2, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1,
         1, 1, 2, 1, 2, 2, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1,
@@ -620,7 +627,7 @@ namespace dmc
     public:
 
         _VoxelInfo() = default;
-        _VoxelInfo(voxel_index1D_type index) : index1D(index) { }
+        _VoxelInfo(voxel_index1D_type index) : m_index1D(index), m_info(0) { }
         
         void encode_edge_is_bipolar(voxel_edge_index_type edge, bool is_bipolar)
         {
@@ -645,6 +652,7 @@ namespace dmc
             uint8_t shift = get_edge_shift(edge);
             return (bool)info_read_bit(shift);
         }
+        
         // An edge that is 'CCW' means the polarization direction of the edge aligns with the positive axis.
         // [precondition] 'edge' must be bipolar
         bool is_edge_ccw(voxel_edge_index_type edge) const
@@ -659,7 +667,21 @@ namespace dmc
         
         inline bool use_lut2() const { return (bool)info_read_bit(USE_LUT2_SHIFT); }
         
-        uint8_t num_bipolar_edges() const
+        voxel_index1D_type index1D() const { return m_index1D; }
+        
+        voxel_config_type config() const { return m_config; }
+        
+        void set_config(voxel_config_type c) { m_config = c; }
+        
+        inline vertex_index_type vertex_begin() const { return m_vertex_begin; }
+        
+        void set_vertex_begin(vertex_index_type begin) { m_vertex_begin = begin; }
+        
+        uint8_t num_vertices() const { return m_num_vertices; }
+        
+        void set_num_vertices(uint8_t num) { m_num_vertices = num; }
+        
+        uint8_t num_edge_vertices() const
         {
             uint8_t num = 0;
             num += info_read_bit(EDGE_6_SHIFT);
@@ -671,20 +693,20 @@ namespace dmc
         inline uint8_t num_iso_vertices() const
         {
             // return use_lut2() ? num_vertex_lut2[config] : num_vertex_lut1[config];
-            return num_vertices - num_bipolar_edges();
+            return m_num_vertices - num_edge_vertices();
         }
         
-        inline unsigned iso_vertex_begin() const { return vertex_begin; }
+        inline vertex_index_type iso_vertex_begin() const { return vertex_begin(); }
         
-        inline unsigned iso_vertex_index(vertex_index_type iso_vertex_m) const
+        inline vertex_index_type iso_vertex_index(iso_vertex_m_type iso_vertex_m) const
         {
             assert(iso_vertex_m < num_iso_vertices());
             return iso_vertex_begin() + iso_vertex_m;
         }
         
-        inline unsigned edge_vertex_begin() const { return vertex_begin + num_iso_vertices(); }
+        inline vertex_index_type edge_vertex_begin() const { return m_vertex_begin + num_iso_vertices(); }
         
-        unsigned edge_vertex_index(voxel_edge_index_type edge) const
+        vertex_index_type edge_vertex_index(voxel_edge_index_type edge) const
         {
             assert(is_edge_bipolar(edge));
             
@@ -696,41 +718,17 @@ namespace dmc
             return edge_vertex_begin() + offset;
         }
         
-        vertex_index_type iso_vertex_m_by_edge(voxel_edge_index_type edge) const
+        iso_vertex_m_type iso_vertex_m_by_edge(voxel_edge_index_type edge) const
         {
             if (use_lut2())
             {
-                return config_edge_lut2[config][edge];
+                return config_edge_lut2[m_config][edge];
             }
             else
             {
-                return config_edge_lut1[config][edge];
+                return config_edge_lut1[m_config][edge];
             }
         }
-        
-        // Its index_1D
-        voxel_index1D_type index1D = INVALID_INDEX_1D;
-        // The beginning index of the vertices (both DMC iso_vertex and iso-surface edge
-        // intersection point).
-        unsigned vertex_begin = INVALID_UINT32;
-        // The voxel config mask, each bit corresponds to one unique vertex corner point.
-        // LSB (bit 0) represents corner pt 0, MSB (bit 7) represents corner pt 7
-        voxel_config_type config = 0x00;
-        // Compact bit vector:
-        // bit 7: should use LUT2?
-        // bit 5: is edge 10 using ccw?
-        // bit 4: is edge 9 using ccw?
-        // bit 3: is edge 6 using ccw?
-        // bit 2: is edge 10 bipolar?
-        // bit 1: is edge 9 bipolar?
-        // bit 0: is edge 6 bipolar?
-        // other bits: not used
-        info_type info = 0x00;
-        // Since this class will be enforeced aligned, we can use another 8 bit to store the
-        // number of vertices, although we can fully retrieve this information under the help
-        // of both 'info' and other 'LUT's. 8_bit is quite enough because each voxel will have
-        // a maximum of 4 + 3 = 7 vertices. (4 for DMC iso-vertices, 3 for bipolar edge pts)
-        uint8_t num_vertices = 0;
         
     private:
         uint8_t get_edge_shift(voxel_edge_index_type edge) const
@@ -760,27 +758,52 @@ namespace dmc
             if (flag)
             {
                 mask = 0x01 << shift;
-                info |= mask;
+                m_info |= mask;
             }
             else
             {
                 mask = ~(0x01 << shift);
-                info &= mask;
+                m_info &= mask;
             }
         }
         
         inline info_type info_read_bit(uint8_t shift) const
         {
-            info_type shifted_info = info >> shift;
+            info_type shifted_info = m_info >> shift;
             return shifted_info & 0x01;
         }
+        
+        
+        // Its index_1D
+        voxel_index1D_type m_index1D = INVALID_INDEX_1D;
+        // The beginning index of the vertices (both DMC iso_vertex and iso-surface edge
+        // intersection point).
+        vertex_index_type m_vertex_begin = INVALID_UINT32;
+        // The voxel config mask, each bit corresponds to one unique vertex corner point.
+        // LSB (bit 0) represents corner pt 0, MSB (bit 7) represents corner pt 7
+        voxel_config_type m_config = 0x00;
+        // Compact bit vector:
+        // bit 7: should use LUT2?
+        // bit 5: is edge 10 using ccw?
+        // bit 4: is edge 9 using ccw?
+        // bit 3: is edge 6 using ccw?
+        // bit 2: is edge 10 bipolar?
+        // bit 1: is edge 9 bipolar?
+        // bit 0: is edge 6 bipolar?
+        // other bits: not used
+        info_type m_info = 0x00;
+        // Since this class will be enforeced aligned, we can use another 8 bit to store the
+        // number of vertices, although we can fully retrieve this information under the help
+        // of both 'info' and other 'LUT's. 8_bit is quite enough because each voxel will have
+        // a maximum of 4 + 3 = 7 vertices. (4 for DMC iso-vertices, 3 for bipolar edge pts)
+        uint8_t m_num_vertices = 0;
     };
     
     // Calculate a voxel's config mask.
     voxel_config_type voxel_config_mask(const float* voxel_vals, float iso_value)
     {
         voxel_config_type mask = 0;
-        for (unsigned i = 0; i < 8; ++i)
+        for (uint8_t i = 0; i < 8; ++i)
         {
             mask |= (voxel_vals[i] < iso_value) << i;
         }
@@ -912,7 +935,7 @@ namespace dmc
         for (_VoxelInfo& vx_info : compact_voxel_info)
         {
             // index1D = compact_voxel_info[i].index1D;
-            voxel_index1D_type index1D = vx_info.index1D;
+            voxel_index1D_type index1D = vx_info.index1D();
             uint3 index3D;
             index1D_to_3D(index1D, num_voxels_dim, index3D);
             // Calculate the voxel config by eight voxel points value
@@ -928,7 +951,7 @@ namespace dmc
                 scalar_grid(index3D.x,     index3D.y + 1, index3D.z + 1)
             };
             voxel_config_type voxel_config = voxel_config_mask(voxel_vals, iso_value);
-            vx_info.config = voxel_config;
+            vx_info.set_config(voxel_config);
             // Calculate if the three edges 6, 9, 10 are bipolar
             auto encode_voxel_edge_info = [=, &vx_info](voxel_pt_index_type p0, voxel_pt_index_type p1)
             {
@@ -1059,10 +1082,10 @@ namespace dmc
                                       const std::vector<voxel_index1D_type>& full_voxel_index_map,
                                       const uint3& num_voxels_dim)
     {
-        assert(compact_voxel_info[cur_compact_index].config == config_2B_3B_lut[cur_config_index]);
+        assert(compact_voxel_info[cur_compact_index].config() == config_2B_3B_lut[cur_config_index]);
         // Get the 3D coordinate of the current active voxel
         uint3 cur_index3D;
-        index1D_to_3D(compact_voxel_info[cur_compact_index].index1D, num_voxels_dim, cur_index3D);
+        index1D_to_3D(compact_voxel_info[cur_compact_index].index1D(), num_voxels_dim, cur_index3D);
         // Get the checking direction, or offset, according to 'cur_ambiguous_face'
         voxel_face_index_type cur_ambiguous_face = config_2B_3B_ambiguous_face[cur_config_index];
         CHECK_DIR dir = face_to_check_dir_lut[cur_ambiguous_face];
@@ -1081,7 +1104,7 @@ namespace dmc
         assert(adjc_compact_index_to_check != INVALID_INDEX_1D);
         
         uint8_t adj_config_index;
-        if (is_ambiguous_config(compact_voxel_info[adjc_compact_index_to_check].config, adj_config_index))
+        if (is_ambiguous_config(compact_voxel_info[adjc_compact_index_to_check].config(), adj_config_index))
         {
             voxel_face_index_type adj_ambiguous_face = config_2B_3B_ambiguous_face[adj_config_index];
             assert(opposite_face_lut[cur_ambiguous_face] == adj_ambiguous_face);
@@ -1104,7 +1127,7 @@ namespace dmc
             uint8_t ambiguous_config_index = INVALID_UINT8;
             
             if ((compact_voxel_info[compact_index].use_lut2()) ||
-                (!is_ambiguous_config(compact_voxel_info[compact_index].config, ambiguous_config_index)))
+                (!is_ambiguous_config(compact_voxel_info[compact_index].config(), ambiguous_config_index)))
             {
                 continue;
             }
@@ -1123,18 +1146,19 @@ namespace dmc
         for (_VoxelInfo& vx_info : compact_voxel_info)
         {
             uint8_t num_voxel_vertices = 0;
-            vx_info.vertex_begin = num_total_vertices;
+            vx_info.set_vertex_begin(num_total_vertices);
             
             if (vx_info.use_lut2())
             {
-                num_voxel_vertices += num_vertex_lut2[vx_info.config];
+                num_voxel_vertices += num_vertex_lut2[vx_info.config()];
             }
             else
             {
-                num_voxel_vertices += num_vertex_lut1[vx_info.config];
+                num_voxel_vertices += num_vertex_lut1[vx_info.config()];
             }
-            num_voxel_vertices += vx_info.num_bipolar_edges();
-            vx_info.num_vertices = num_voxel_vertices;
+            
+            num_voxel_vertices += vx_info.num_edge_vertices();
+            vx_info.set_num_vertices(num_voxel_vertices);
             num_total_vertices += num_voxel_vertices;
         }
         return num_total_vertices;
@@ -1203,11 +1227,9 @@ namespace dmc
         uint3 num_voxels_dim;
         get_num_voxels_dim_from_scalar_grid(num_voxels_dim, scalar_grid);
         
-        
-        
         for (const _VoxelInfo& vx_info : compact_voxel_info)
         {
-            voxel_index1D_type index1D = vx_info.index1D;
+            voxel_index1D_type index1D = vx_info.index1D();
             uint3 index3D;
             index1D_to_3D(index1D, num_voxels_dim, index3D);
             
@@ -1242,14 +1264,16 @@ namespace dmc
                 scalar_grid(index3D.x,     index3D.y + 1, index3D.z + 1)
             };
             
-            unsigned vx_vertex_index = vx_info.edge_vertex_begin();
+            vertex_index_type vx_edge_vertex_index = vx_info.edge_vertex_begin();
             auto calc_edge_vertex = [&](uint8_t edge_index, uint8_t pt0, uint8_t pt1)
             {
                 if (vx_info.is_edge_bipolar(edge_index))
                 {
-                    compact_vertices[vx_vertex_index] = lerp_float3(voxel_corner_pts[pt0], voxel_corner_pts[pt1],
-                                                                    voxel_vals[pt0], voxel_vals[pt1], iso_value);
-                    vx_vertex_index += 1;
+                    compact_vertices[vx_edge_vertex_index] = lerp_float3(voxel_corner_pts[pt0],
+                                                                         voxel_corner_pts[pt1],
+                                                                         voxel_vals[pt0], voxel_vals[pt1],
+                                                                         iso_value);
+                    vx_edge_vertex_index += 1;
                 }
             };
             
@@ -1257,7 +1281,7 @@ namespace dmc
             calc_edge_vertex(9, 5, 6);      // edge 9, pt 5, 6
             calc_edge_vertex(10, 6, 7);     // edge 10, pt 6, 7
             
-            assert(vx_vertex_index - vx_info.edge_vertex_begin() == vx_info.num_bipolar_edges());
+            assert(vx_edge_vertex_index - vx_info.edge_vertex_begin() == vx_info.num_edge_vertices());
         }
     }
     
@@ -1267,7 +1291,7 @@ namespace dmc
     {
         for (const _VoxelInfo& vx_info : compact_voxel_info)
         {
-            voxel_index1D_type index1D = vx_info.index1D;
+            voxel_index1D_type index1D = vx_info.index1D();
             uint3 index3D;
             index1D_to_3D(index1D, num_voxels_dim, index3D);
             
@@ -1280,7 +1304,7 @@ namespace dmc
                 int8_t x_offset = 0xff, y_offset = 0xff, z_offset = 0xff;
                 
                 // vx_config_edge_lut[vx_info.config][edge];
-                vertex_index_type iso_vertex_m = vx_info.iso_vertex_m_by_edge(edge);
+                iso_vertex_m_type iso_vertex_m = vx_info.iso_vertex_m_by_edge(edge);
 
                 if (iso_vertex_m == NO_VERTEX)
                 {
@@ -1317,9 +1341,9 @@ namespace dmc
                 }
                 // Get the 'belonged_voxel' which manages 'belonged_edge'
                 const _VoxelInfo& belonged_vx_info = compact_voxel_info[full_voxel_index_map[belonged_index1D]];
-                unsigned edge_intersect_vertex_index = belonged_vx_info.edge_vertex_index(belonged_edge);
+                vertex_index_type edge_intersect_vertex_index = belonged_vx_info.edge_vertex_index(belonged_edge);
                 
-                unsigned iso_vertex_index = vx_info.iso_vertex_index(iso_vertex_m);
+                vertex_index_type iso_vertex_index = vx_info.iso_vertex_index(iso_vertex_m);
                 if (iso_vertex_num_incident[iso_vertex_m] == 0)
                 {
                     // If this is the first time we see 'iso_vertex_m', we just assign it
@@ -1335,10 +1359,10 @@ namespace dmc
             }
             // For each iso-vertex managed by 'vx_info', calculate its new position by averaging its
             // associated edges intersection vertex positions.
-            vertex_index_type iso_vertex_m = 0;
+            iso_vertex_m_type iso_vertex_m = 0;
             for (; iso_vertex_m < vx_info.num_iso_vertices(); ++iso_vertex_m)
             {
-                unsigned iso_vertex_index = vx_info.iso_vertex_index(iso_vertex_m);
+                vertex_index_type iso_vertex_index = vx_info.iso_vertex_index(iso_vertex_m);
                 if (iso_vertex_num_incident[iso_vertex_m])
                 {
                     compact_vertices[iso_vertex_index] /= (float)(iso_vertex_num_incident[iso_vertex_m]);
@@ -1347,11 +1371,11 @@ namespace dmc
             // post check
             if (vx_info.use_lut2())
             {
-                assert(iso_vertex_m == num_vertex_lut2[vx_info.config]);
+                assert(iso_vertex_m == num_vertex_lut2[vx_info.config()]);
             }
             else
             {
-                assert(iso_vertex_m == num_vertex_lut1[vx_info.config]);
+                assert(iso_vertex_m == num_vertex_lut1[vx_info.config()]);
             }
         }
     }
@@ -1479,6 +1503,264 @@ namespace dmc
         }
     }
     
+    inline int8_t calc_cross_z_sign(const float2& p_left, const float2& p_mid, const float2& p_right)
+    {
+        float dx1 = p_right.x - p_mid.x, dy1 = p_right.y - p_mid.y;
+        float dx2 = p_left.x - p_mid.x, dy2 = p_left.y - p_mid.y;
+        float cross_z = dx1 * dy2 - dx2 * dy1;
+        return cross_z >= 0 ? 1 : -1;
+    }
+    
+    float calc_radian(const float2& p_left, const float2& p_mid, const float2& p_right)
+    {
+        float2 v_ml = p_left - p_mid;
+        float2 v_mr = p_right - p_mid;
+        
+        normalize(v_ml);
+        normalize(v_mr);
+        
+        float theta = acosf(v_ml.x * v_mr.x + v_ml.y * v_mr.y);
+        return theta;
+    }
+    
+    // is_quadrilateral_convex function acts a bit weird. It tests if the four points
+    // in 'pts' form a convex quadrilateral. If they does, then 'split_index' will not
+    // be changed. Otherwise if they form a concave quadrilateral, 'split_index' stores
+    // the index of the point (in range [0, 3]) that causes the concavity.
+    bool is_quadrilateral_convex(const std::vector<float2>& pts, uint8_t& unique_index)
+    {
+        uint8_t pos_info = 0x00, neg_info = 0x00;
+        
+        auto encode_sign_info = [&](uint8_t& info, uint8_t index)
+        {
+            info &= 0x0f; info += 1;
+            index = (index & 0x0f) << 4;
+            info |= index;
+        };
+        
+        auto calc_sign = [&](uint8_t index)
+        {
+            int8_t sign = calc_cross_z_sign(pts[(index + 4 - 1) % 4], pts[index], pts[(index + 1) % 4]);
+            if (sign == 1)
+            {
+                encode_sign_info(pos_info, index);
+            }
+            else
+            {
+                encode_sign_info(neg_info, index);
+            }
+        };
+        
+        for (uint8_t i = 0; i < 4; ++i)
+        {
+            calc_sign(i);
+        }
+        
+        if (((pos_info & 0x0f) == 0) || ((neg_info & 0x0f) == 0))
+        {
+            return true;
+        }
+        else if ((pos_info & 0x0f) < (neg_info & 0x0f))
+        {
+            unique_index = (pos_info & 0xf0) >> 4;
+        }
+        else if ((neg_info & 0x0f) < (pos_info & 0x0f))
+        {
+            unique_index = (neg_info & 0xf0) >> 4;
+        }
+        else
+        {
+            assert(false);
+        }
+        
+        return false;
+    }
+    
+    void find_quadrilateral_split(const std::vector<float2>& pts, uint8_t& split0, uint8_t& split1)
+    {
+        assert(pts.size() == 4);
+        uint8_t split_index;
+
+        if (is_quadrilateral_convex(pts, split_index))
+        {
+            // If it is convex, then we split the quadrilateral with the diagonal that connects the
+            // point that forms the largest angle.
+            float radian0 = calc_radian(pts[3], pts[0], pts[1]);
+            float radian1 = calc_radian(pts[0], pts[1], pts[2]);
+            float radian2 = calc_radian(pts[1], pts[2], pts[3]);
+            float radian3 = calc_radian(pts[2], pts[3], pts[0]);
+            split_index = (uint8_t)argmax(radian0, radian1, radian2, radian3);
+        }
+        split0 = split_index;
+        split1 = (split0 + 2) % pts.size();
+    }
+    
+    void get_circular_vertices_by_edge(std::vector<vertex_index_type>& iso_vertex_indices,
+                                       voxel_edge_index_type edge, const uint3& index3D, const _VoxelInfo& vx_info,
+                                       const std::vector<_VoxelInfo>& compact_voxel_info,
+                                       const std::vector<voxel_index1D_type>& full_voxel_index_map,
+                                       const uint3& num_voxels_dim)
+    {
+        for (auto circular_edge_iter : CircularEdgeRange(edge, vx_info.is_edge_ccw(edge)))
+        {
+            uint3 circular_index3D;
+            voxel_edge_index_type circular_edge;
+            circular_edge_iter.retrieve(circular_index3D, circular_edge, index3D);
+            
+            voxel_index1D_type circular_index1D;
+            index3D_to_1D(circular_index3D, num_voxels_dim, circular_index1D);
+            
+            assert(full_voxel_index_map[circular_index1D] != INVALID_INDEX_1D);
+            const _VoxelInfo& circular_vx_info = compact_voxel_info[full_voxel_index_map[circular_index1D]];
+            
+            iso_vertex_m_type circular_iso_vertex_m = circular_vx_info.iso_vertex_m_by_edge(circular_edge);
+            assert(circular_iso_vertex_m != NO_VERTEX);
+            
+            vertex_index_type circular_iso_vertex_index = circular_vx_info.iso_vertex_index(circular_iso_vertex_m);
+            iso_vertex_indices.push_back(circular_iso_vertex_index);
+        }
+        assert(iso_vertex_indices.size() == 4);
+    }
+    
+    void project_vertices_by_shared_edge(std::vector<float2>& projected_vertex_pos,
+                                         voxel_edge_index_type edge,
+                                         const std::vector<vertex_index_type>& iso_vertex_indices,
+                                         const std::vector<float3>& compact_vertices)
+    {
+        projected_vertex_pos.clear();
+        if (edge == 6)
+        {
+            for (vertex_index_type iso_vertex_index : iso_vertex_indices)
+            {
+                projected_vertex_pos.push_back(compact_vertices[iso_vertex_index].xy());
+            }
+        }
+        else if (edge == 9)
+        {
+            for (vertex_index_type iso_vertex_index : iso_vertex_indices)
+            {
+                projected_vertex_pos.push_back(compact_vertices[iso_vertex_index].xz());
+            }
+        }
+        else if (edge == 10)
+        {
+            for (vertex_index_type iso_vertex_index : iso_vertex_indices)
+            {
+                projected_vertex_pos.push_back(compact_vertices[iso_vertex_index].yz());
+            }
+        }
+        else
+        {
+            assert(false);
+        }
+    }
+    
+    const float EPSILON = 1e-4;
+    template <typename Vec>
+    bool is_inside_triangle(const Vec& p0, const Vec& p1, const Vec& p2, const Vec& pt,
+                         float& alpha, float& beta, float& gamma)
+    {
+        Vec v0(p1 - p0), v1(p2 - p0), v2(pt - p0);
+        float d00 = dot(v0, v0);
+        float d10 = dot(v1, v0);
+        float d11 = dot(v1, v1);
+        float d20 = dot(v2, v0);
+        float d21 = dot(v2, v1);
+        
+        float denom_inv = d00 * d11 - d10 * d10;
+        denom_inv = 1.0f / denom_inv;
+        beta = (d11 * d20 - d10 * d21) * denom_inv;
+        gamma = (d00 * d21 - d10 * d20) * denom_inv;
+        alpha = 1.0f - beta - gamma;
+        
+        return (-EPSILON < beta) && (-EPSILON < gamma) && (beta + gamma < 1.0 + EPSILON);
+    }
+    
+    void smooth_edge_vertices(std::vector<float3>& compact_vertices,
+                              const std::vector<_VoxelInfo>& compact_voxel_info,
+                              const std::vector<voxel_index1D_type>& full_voxel_index_map,
+                              const float3& xyz_min, const float3& xyz_max, const uint3& num_voxels_dim)
+    {
+        static const std::vector<voxel_edge_index_type> edges_vec = {6, 9, 10};
+        const float3 xyz_range = xyz_max - xyz_min;
+        
+        unsigned changed = 0;
+        
+        for (const _VoxelInfo& vx_info : compact_voxel_info)
+        {
+            uint3 index3D;
+            index1D_to_3D(vx_info.index1D(), num_voxels_dim, index3D);
+            
+            for (voxel_edge_index_type edge : edges_vec)
+            {
+                if ((!vx_info.is_edge_bipolar(edge)) ||
+                    circular_edge_exceed_boundary(edge, index3D, num_voxels_dim))
+                {
+                    continue;
+                }
+                
+                std::vector<vertex_index_type> iso_vertex_indices;
+                get_circular_vertices_by_edge(iso_vertex_indices, edge, index3D, vx_info,
+                                              compact_voxel_info, full_voxel_index_map, num_voxels_dim);
+                
+                std::vector<float2> projected_vertex_pos;
+                project_vertices_by_shared_edge(projected_vertex_pos, edge,
+                                                iso_vertex_indices, compact_vertices);
+                
+
+                uint8_t split0 = INVALID_UINT8, split1 = INVALID_UINT8;
+                find_quadrilateral_split(projected_vertex_pos, split0, split1);
+                
+                float x1 = ijk_to_xyz(index3D.x + 1, num_voxels_dim.x, xyz_range.x, xyz_min.x);
+                float y1 = ijk_to_xyz(index3D.y + 1, num_voxels_dim.y, xyz_range.y, xyz_min.y);
+                float z1 = ijk_to_xyz(index3D.z + 1, num_voxels_dim.z, xyz_range.z, xyz_min.z);
+                
+                float2 origin;
+                if (edge == 6) origin = make_float2(x1, y1);
+                else if (edge == 9) origin = make_float2(x1, z1);
+                else origin = make_float2(y1, z1);
+                
+                float alpha, beta, gamma;
+                
+                if (is_inside_triangle(projected_vertex_pos[split0],
+                                       projected_vertex_pos[(split0 + 1) % 4],
+                                       projected_vertex_pos[split1],
+                                       origin, alpha, beta, gamma))
+                {
+                    float3& edge_vertex = compact_vertices[vx_info.edge_vertex_index(edge)];
+                    
+                    edge_vertex  = alpha * compact_vertices[iso_vertex_indices[split0]];
+                    edge_vertex += beta  * compact_vertices[iso_vertex_indices[(split0 + 1) % 4]];
+                    edge_vertex += gamma * compact_vertices[iso_vertex_indices[split1]];
+                    
+                    ++changed;
+                }
+                else if (is_inside_triangle(projected_vertex_pos[split1],
+                                            projected_vertex_pos[(split1 + 1) % 4],
+                                            projected_vertex_pos[split0],
+                                            origin, alpha, beta, gamma))
+                {
+                    /*
+                    assert(is_inside_triangle(projected_vertex_pos[split1],
+                                              projected_vertex_pos[(split1 + 1) % 4],
+                                              projected_vertex_pos[split0],
+                                              origin, alpha, beta, gamma));
+                    */
+                    float3& edge_vertex = compact_vertices[vx_info.edge_vertex_index(edge)];
+                    
+                    edge_vertex  = alpha * compact_vertices[iso_vertex_indices[split1]];
+                    edge_vertex += beta  * compact_vertices[iso_vertex_indices[(split1 + 1) % 4]];
+                    edge_vertex += gamma * compact_vertices[iso_vertex_indices[split0]];
+                    
+                    ++changed;
+                }
+            }
+            //if (changed > 9)
+            //    break;
+        }
+        std::cout << "num smoothed: " << changed << std::endl;
+    }
+
     // Genreate the actual triangles information of the mesh.
     void generate_triangles(std::vector<uint3>& compact_triangles,
                             const std::vector<float3>& compact_vertices,
@@ -1493,15 +1775,8 @@ namespace dmc
         for (const _VoxelInfo& vx_info : compact_voxel_info)
         {
             uint3 index3D;
-            index1D_to_3D(vx_info.index1D, num_voxels_dim, index3D);
-            /*
-            std::cout << "index1D: " << vx_info.index1D
-            << " index3D: " << index3D
-            << " num vertices: " << (unsigned)vx_info.num_vertices
-            << " num iso_vertices: " << (unsigned)vx_info.num_iso_vertices()
-            << " config: " << std::bitset<8>(vx_info.config)
-            << " info: " << std::bitset<8>(vx_info.info) << std::endl;
-            */
+            index1D_to_3D(vx_info.index1D(), num_voxels_dim, index3D);
+
             for (voxel_edge_index_type edge : edges_vec)
             {
                 /*
@@ -1516,30 +1791,12 @@ namespace dmc
                     continue;
                 }
                 
-                std::vector<unsigned> iso_vertices;
-                for (auto circular_edge_iter : CircularEdgeRange(edge, vx_info.is_edge_ccw(edge)))
-                {
-                    uint3 circular_index3D;
-                    voxel_edge_index_type circular_edge;
-                    circular_edge_iter.retrieve(circular_index3D, circular_edge, index3D);
-                    
-                    voxel_index1D_type circular_index1D;
-                    index3D_to_1D(circular_index3D, num_voxels_dim, circular_index1D);
-                    
-                    assert(full_voxel_index_map[circular_index1D] != INVALID_INDEX_1D);
-                    const _VoxelInfo& circular_vx_info = compact_voxel_info[full_voxel_index_map[circular_index1D]];
-                    
-                    vertex_index_type circular_iso_vertex_m = circular_vx_info.iso_vertex_m_by_edge(circular_edge);
-                    assert(circular_iso_vertex_m != NO_VERTEX);
-                    // iso_vertices.push_back(circular_vx_info.iso_vertex_begin() + circular_iso_vertex_m);
-                    
-                    unsigned circular_iso_vertex_index = circular_vx_info.iso_vertex_index(circular_iso_vertex_m);
-                    iso_vertices.push_back(circular_iso_vertex_index);
-                }
-                assert(iso_vertices.size() == 4);
+                std::vector<vertex_index_type> iso_vertex_indices;
+                get_circular_vertices_by_edge(iso_vertex_indices, edge, index3D, vx_info,
+                                              compact_voxel_info, full_voxel_index_map, num_voxels_dim);
                 
-                uint3 tri1 = make_uint3(iso_vertices[0], iso_vertices[1], iso_vertices[2]);
-                uint3 tri2 = make_uint3(iso_vertices[2], iso_vertices[3], iso_vertices[0]);
+                uint3 tri1 = make_uint3(iso_vertex_indices[0], iso_vertex_indices[1], iso_vertex_indices[2]);
+                uint3 tri2 = make_uint3(iso_vertex_indices[2], iso_vertex_indices[3], iso_vertex_indices[0]);
                 compact_triangles.push_back(tri1);
                 compact_triangles.push_back(tri2);
             }
@@ -1547,8 +1804,11 @@ namespace dmc
     }
     
     void run_dmc(std::vector<float3>& compact_vertices, std::vector<uint3>& compact_triangles,
-                 const scalar_grid_type& scalar_grid, const float3& xyz_min, const float3& xyz_max, float iso_value)
+                 const scalar_grid_type& scalar_grid, const float3& xyz_min, const float3& xyz_max, float iso_value,
+                 unsigned num_smooth = 0)
     {
+        compact_triangles.clear();
+        
         uint3 num_voxels_dim;
         get_num_voxels_dim_from_scalar_grid(num_voxels_dim, scalar_grid);
         
@@ -1568,7 +1828,13 @@ namespace dmc
                                           xyz_min, xyz_max, iso_value);
         calc_iso_vertices(compact_vertices, compact_voxel_info, full_voxel_index_map, num_voxels_dim);
         
-        compact_triangles.clear();
+        for (unsigned smooth_iter = 0; smooth_iter < num_smooth; ++smooth_iter)
+        {
+            smooth_edge_vertices(compact_vertices, compact_voxel_info, full_voxel_index_map,
+                                 xyz_min, xyz_max, num_voxels_dim);
+            calc_iso_vertices(compact_vertices, compact_voxel_info, full_voxel_index_map, num_voxels_dim);
+        }
+        
         generate_triangles(compact_triangles, compact_vertices, compact_voxel_info,
                            full_voxel_index_map, num_voxels_dim);
     }

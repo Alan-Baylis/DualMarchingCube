@@ -7,35 +7,43 @@ def is_convex(pts):
 
     stack = []
     for i in xrange(N):
-        dx1 = pts[(i+2)%N,0] - pts[(i+1)%N,0]
-        dy1 = pts[(i+2)%N,1] - pts[(i+1)%N,1]
-        dx2 = pts[i,0] - pts[(i+1)%N,0]
-        dy2 = pts[i,1] - pts[(i+1)%N,1]
+        dx1 = pts[(i+N-1)%N,0] - pts[i,0]
+        dy1 = pts[(i+N-1)%N,1] - pts[i,1]
+        dx2 = pts[(i+1)%N,0] - pts[i,0]
+        dy2 = pts[(i+1)%N,1] - pts[i,1]
 
         cross_z = dx1 * dy2 - dx2 * dy1
-        stack.append(cross_z)
+        stack.append(cross_z > 0)
+        '''
         if sign is None:
             sign = [-1, 1][cross_z > 0]
         elif sign * cross_z < 0:
-            print i, stack
+            
             return False
-    return True
+        '''
+    print stack
+    return len(set(stack)) == 1
+    # return True
 
 if __name__ == '__main__':
-    pts = np.random.rand(4,2)
-    '''
-    pts = [[ 0.84987003, 0.18621169],   \
-            [ 0.60694906, 0.78514431],  \
-            [ 0.30490175, 0.78103365],  \
-            [ 0.35901865, 0.23070076]]
+    # pts = np.random.rand(4,2)
+    
+    pts = [ [-1.15461111, -1.15461111],   \
+            [-0.923076868, -1.2339797],  \
+            [-0.924950122, -0.924950122],  \
+            [-1.2339797, -0.923076868]]
     pts = np.array(pts)
-    '''
-    print pts
+    
+    print '{'
+    for i in xrange(4):
+        print '   {%f, %f},' % (pts[i,0], pts[i,1])
+    print '};'
     print is_convex(pts)
 
     for i in xrange(pts.shape[0]):
         plt.annotate(str(i), xy = pts[i,:])
 
+    plt.annotate('origin', xy = (-1.15384603, -1.15384603))
     pts_plot = np.zeros((5,2))
     pts_plot[:4,:] = pts
     pts_plot[4,:] = pts[0,:]

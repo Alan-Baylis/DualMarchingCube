@@ -100,7 +100,7 @@ namespace
         */
         std::vector<float3> compact_vertices;
         std::vector<uint3> compact_triangles;
-        dmc::run_dmc(compact_vertices, compact_triangles, scalar_grid, xyz_min, xyz_max, iso_value, 11);
+        dmc::run_dmc(compact_vertices, compact_triangles, scalar_grid, xyz_min, xyz_max, iso_value, 30);
         for (const auto& vertex : compact_vertices)
         {
             std::cout << "v " << vertex.x << " " << vertex.y << " " << vertex.z << std::endl;

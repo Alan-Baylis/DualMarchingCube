@@ -1523,14 +1523,9 @@ namespace dmc
         return theta;
     }
     
-    // is_quadrilateral_convex function acts a bit weird. It tests if the four points
-    // in 'pts' form a convex quadrilateral. If they does, then 'split_index' will not
-    // be changed. Otherwise if they form a concave quadrilateral, 'split_index' stores
-    // the index of the point (in range [0, 3]) that causes the concavity.
-    bool is_quadrilateral_convex(const std::vector<float2>& pts, uint8_t& unique_index)
+    void calc_quadrilateral_signs(const std::vector<float2>& pts, uint8_t& pos_info, uint8_t& neg_info)
     {
-        uint8_t pos_info = 0x00, neg_info = 0x00;
-        
+        pos_info = 0x00; neg_info = 0x00;
         auto encode_sign_info = [&](uint8_t& info, uint8_t index)
         {
             info &= 0x0f; info += 1;
@@ -1555,7 +1550,19 @@ namespace dmc
         {
             calc_sign(i);
         }
-        
+    }
+    
+    bool is_quadrilateral_complex(uint8_t pos_info, uint8_t neg_info)
+    {
+        return (pos_info & 0x0f) == (neg_info & 0x0f);
+    }
+    
+    // is_quadrilateral_convex function acts a bit weird. It tests if the four points
+    // in 'pts' form a convex quadrilateral. If they does, then 'split_index' will not
+    // be changed. Otherwise if they form a concave quadrilateral, 'split_index' stores
+    // the index of the point (in range [0, 3]) that causes the concavity.
+    bool is_quadrilateral_convex(uint8_t pos_info, uint8_t neg_info, uint8_t& unique_index)
+    {
         if (((pos_info & 0x0f) == 0) || ((neg_info & 0x0f) == 0))
         {
             return true;
@@ -1576,8 +1583,40 @@ namespace dmc
         return false;
     }
     
+    bool is_quadrilateral_convex(const std::vector<float2>& pts, uint8_t& unique_index)
+    {
+        uint8_t pos_info = 0x00, neg_info = 0x00;
+        calc_quadrilateral_signs(pts, pos_info, neg_info);
+        
+        return is_quadrilateral_convex(pos_info, neg_info, unique_index);
+    }
+    
+    void find_quadrilateral_split(const std::vector<float2>& pts, uint8_t pos_info, uint8_t neg_info,
+                                  uint8_t& split0, uint8_t& split1)
+    {
+        assert(pts.size() == 4);
+        uint8_t split_index;
+        
+        if (is_quadrilateral_convex(pos_info, neg_info, split_index))
+        {
+            // If it is convex, then we split the quadrilateral with the diagonal that connects the
+            // point that forms the largest angle.
+            float radian0 = calc_radian(pts[3], pts[0], pts[1]);
+            float radian1 = calc_radian(pts[0], pts[1], pts[2]);
+            float radian2 = calc_radian(pts[1], pts[2], pts[3]);
+            float radian3 = calc_radian(pts[2], pts[3], pts[0]);
+            split_index = (uint8_t)argmax(radian0, radian1, radian2, radian3);
+        }
+        split0 = split_index;
+        split1 = (split0 + 2) % pts.size();
+    }
+    
     void find_quadrilateral_split(const std::vector<float2>& pts, uint8_t& split0, uint8_t& split1)
     {
+        uint8_t pos_info = 0x00, neg_info = 0x00;
+        calc_quadrilateral_signs(pts, pos_info, neg_info);
+        find_quadrilateral_split(pts, pos_info, neg_info, split0, split1);
+        /*
         assert(pts.size() == 4);
         uint8_t split_index;
 
@@ -1593,6 +1632,7 @@ namespace dmc
         }
         split0 = split_index;
         split1 = (split0 + 2) % pts.size();
+        */
     }
     
     void get_circular_vertices_by_edge(std::vector<vertex_index_type>& iso_vertex_indices,
@@ -1707,9 +1747,16 @@ namespace dmc
                 project_vertices_by_shared_edge(projected_vertex_pos, edge,
                                                 iso_vertex_indices, compact_vertices);
                 
-
+                uint8_t pos_info = 0x00, neg_info = 0x00;
+                calc_quadrilateral_signs(projected_vertex_pos, pos_info, neg_info);
+                if (is_quadrilateral_complex(pos_info, neg_info))
+                {
+                    continue;
+                }
+                
                 uint8_t split0 = INVALID_UINT8, split1 = INVALID_UINT8;
-                find_quadrilateral_split(projected_vertex_pos, split0, split1);
+                find_quadrilateral_split(projected_vertex_pos, pos_info, neg_info, split0, split1);
+                // find_quadrilateral_split(projected_vertex_pos, split0, split1);
                 
                 float x1 = ijk_to_xyz(index3D.x + 1, num_voxels_dim.x, xyz_range.x, xyz_min.x);
                 float y1 = ijk_to_xyz(index3D.y + 1, num_voxels_dim.y, xyz_range.y, xyz_min.y);
@@ -1830,6 +1877,7 @@ namespace dmc
         
         for (unsigned smooth_iter = 0; smooth_iter < num_smooth; ++smooth_iter)
         {
+            std::cout << "smooth iter: " << smooth_iter << std::endl;
             smooth_edge_vertices(compact_vertices, compact_voxel_info, full_voxel_index_map,
                                  xyz_min, xyz_max, num_voxels_dim);
             calc_iso_vertices(compact_vertices, compact_voxel_info, full_voxel_index_map, num_voxels_dim);

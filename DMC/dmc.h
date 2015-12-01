@@ -1163,7 +1163,7 @@ namespace dmc
         }
         return num_total_vertices;
     }
-    
+    /*
     uint16_t LOCAL_EDGE_ENTRY = 0xffff;
     // local edges: 6, 9, 10
     uint16_t edge_belonged_voxel_lut[VOXEL_NUM_EDGES] =
@@ -1181,39 +1181,55 @@ namespace dmc
                 LOCAL_EDGE_ENTRY,           // 10
         ( 0xc000 | 0x0000 | 0x0000 ) | 9,   // 11
     };
+    */
     
-    void decode_edge_belong_voxel_entry(uint16_t entry,
+    const uint8_t LOCAL_EDGE_ENTRY = 0xff;
+    const uint8_t edge_belonged_voxel_lut[VOXEL_NUM_EDGES] =
+    {
+        ( 0x00 | 0x40 | 0x20 ) | 10,    // 0
+        ( 0x00 | 0x00 | 0x20 ) | 9,     // 1
+        ( 0x00 | 0x00 | 0x20 ) | 10,    // 2
+        ( 0x80 | 0x00 | 0x20 ) | 9,     // 3
+        ( 0x80 | 0x40 | 0x00 ) | 6,     // 4
+        ( 0x00 | 0x40 | 0x00 ) | 6,     // 5
+        LOCAL_EDGE_ENTRY,               // 6
+        ( 0x80 | 0x00 | 0x00 ) | 6,     // 7
+        ( 0x00 | 0x40 | 0x00 ) | 10,    // 8
+        LOCAL_EDGE_ENTRY,               // 9
+        LOCAL_EDGE_ENTRY,               // 10
+        ( 0x80 | 0x00 | 0x00 ) | 9,     // 11
+    };
+    
+    void decode_edge_belong_voxel_entry(uint8_t entry,
                                         int8_t& x_offset, int8_t& y_offset, int8_t& z_offset,
                                         uint8_t& belonged_edge_index)
     {
-        if (entry == 0xffff) return;
+        if (entry == LOCAL_EDGE_ENTRY) return;
         // extract the edge
-        belonged_edge_index = 0x00ff & entry;
+        belonged_edge_index = 0x0f & entry;
         
-        auto get_offset = [](uint16_t two_bits)
+        auto get_offset = [](uint8_t first_bit)
         {
-            switch (two_bits) {
-                case 0x0000:
+            switch (first_bit) {
+                case 0x00:
                     return (int8_t)0;
-                case 0x4000:
-                    return (int8_t)1;
-                case 0xc000:
+                case 0x80:
                     return (int8_t)-1;
                 default:
                     assert(false);
             }
         };
         
-        uint16_t two_bits = entry & 0xc000;
-        x_offset = get_offset(two_bits);
+        uint8_t first_bit = entry & 0x80;
+        x_offset = get_offset(first_bit);
         
-        entry <<= 2;
-        two_bits = entry & 0xc000;
-        y_offset = get_offset(two_bits);
+        entry <<= 1;
+        first_bit = entry & 0x80;
+        y_offset = get_offset(first_bit);
         
-        entry <<= 2;
-        two_bits = entry & 0xc000;
-        z_offset = get_offset(two_bits);
+        entry <<= 1;
+        first_bit = entry & 0x80;
+        z_offset = get_offset(first_bit);
     }
     // Sample the intersection vertices positions between voxel bipolar edges and iso-surface.
     // Each voxel is only responsible for its local edges, namely 6, 9 and 10.
@@ -1301,8 +1317,6 @@ namespace dmc
             
             for (voxel_edge_index_type edge = 0; edge < VOXEL_NUM_EDGES; ++edge)
             {
-                int8_t x_offset = 0xff, y_offset = 0xff, z_offset = 0xff;
-                
                 // vx_config_edge_lut[vx_info.config][edge];
                 iso_vertex_m_type iso_vertex_m = vx_info.iso_vertex_m_by_edge(edge);
 
@@ -1313,7 +1327,7 @@ namespace dmc
                 
                 // Find out the voxel which is responsible for 'edge'. From that voxel we can retrieve
                 // the edge intersect vertex index.
-                uint16_t entry = edge_belonged_voxel_lut[edge];
+                uint8_t entry = edge_belonged_voxel_lut[edge];
                 voxel_edge_index_type belonged_edge = 0xff;
                 voxel_index1D_type belonged_index1D = INVALID_INDEX_1D;
                 
@@ -1325,6 +1339,7 @@ namespace dmc
                 }
                 else
                 {
+                    int8_t x_offset = 0xff, y_offset = 0xff, z_offset = 0xff;
                     decode_edge_belong_voxel_entry(entry, x_offset, y_offset, z_offset, belonged_edge);
                     // here the voxel we want may actually exceed boundary, so we just ignore it.
                     bool exceed_boundary  = (x_offset < 0 && index3D.x == 0) ||
@@ -1439,7 +1454,7 @@ namespace dmc
                     circular_edge = circular_edge_lut[m_lut_index][cw_order[m_cur_state]];
                 }
                 // reverse calculate the adjacent voxel that shares the edge
-                uint16_t entry = edge_belonged_voxel_lut[circular_edge];
+                uint8_t entry = edge_belonged_voxel_lut[circular_edge];
                 if (entry == LOCAL_EDGE_ENTRY)
                 {
                     circular_index3D = src_index3D;

@@ -904,19 +904,19 @@ namespace dmc
     // [invariant] for 0 <= i < compact_voxel_info.size(),
     //                  full_voxel_index_map[compact_voxel_info[i].index1D] == i
     void compact_voxel_flags(std::vector<_VoxelInfo>& compact_voxel_info,
-                             std::vector<voxel_index1D_type>& full_voxel_index_map,
+                             // std::vector<voxel_index1D_type>& full_voxel_index_map,
                              const std::vector<flag_type>& flags)
     {
         compact_voxel_info.clear();
-        full_voxel_index_map.clear();
-        full_voxel_index_map.resize(flags.size());
-        std::fill(full_voxel_index_map.begin(), full_voxel_index_map.end(), INVALID_UINT32);
+        // full_voxel_index_map.clear();
+        // full_voxel_index_map.resize(flags.size());
+        // std::fill(full_voxel_index_map.begin(), full_voxel_index_map.end(), INVALID_UINT32);
         
         for (voxel_index1D_type index1D = 0; index1D < flags.size(); ++index1D)
         {
             if (flags[index1D])
             {
-                full_voxel_index_map[index1D] = (unsigned)compact_voxel_info.size();
+                // full_voxel_index_map[index1D] = (unsigned)compact_voxel_info.size();
                 compact_voxel_info.push_back(_VoxelInfo(index1D));
             }
         }
@@ -1073,19 +1073,70 @@ namespace dmc
         }
     }
     
+    unsigned bin_search(const std::vector<_VoxelInfo>& compact_voxel_info,
+                                  const voxel_index1D_type index1D, unsigned lo, unsigned hi)
+    {
+        unsigned mid;
+        while (lo < hi)
+        {
+            mid = lo + ((hi - lo) >> 1);
+            if (compact_voxel_info[mid].index1D() == index1D)
+            {
+                return mid;
+            }
+            else if (compact_voxel_info[mid].index1D() < index1D)
+            {
+                lo = mid + 1;
+            }
+            else
+            {
+                hi = mid;
+            }
+        }
+        return INVALID_UINT32;
+    }
+    
+    inline unsigned
+    index1D_to_compact_index_lut(const std::vector<_VoxelInfo>& compact_voxel_info,
+                                 const voxel_index1D_type index1D_to_find,
+                                 const voxel_index1D_type index1D_ref, const unsigned compact_index_ref)
+    {
+        if (index1D_to_find == index1D_ref)
+        {
+            return compact_index_ref;
+        }
+        else if (index1D_to_find < index1D_ref)
+        {
+            return bin_search(compact_voxel_info, index1D_to_find, 0, compact_index_ref);
+        }
+        else
+        {
+            return bin_search(compact_voxel_info, index1D_to_find,
+                              compact_index_ref + 1, (unsigned)compact_voxel_info.size());
+        }
+    }
+    
+    inline unsigned
+    index1D_to_compact_index_lut(const std::vector<_VoxelInfo>& compact_voxel_info,
+                                 const voxel_index1D_type index1D_to_find)
+    {
+        return bin_search(compact_voxel_info, index1D_to_find, 0, (unsigned)compact_voxel_info.size());
+    }
+    
     // Check if the active voxel indicated by 'cur_compact_index' has an adjacent voxel which has
     // an ambiguous config that will result in non-manifold situation.
     // [precondition] compact_voxel_info[cur_compact_index].config == config_2B_3B_lut[cur_config_index]
-    bool is_adjacent_ambiguous_config(voxel_index1D_type& adjacent_compact_index,
-                                      voxel_index1D_type cur_compact_index, uint8_t cur_config_index,
+    bool is_adjacent_ambiguous_config(unsigned& adjacent_compact_index,
+                                      unsigned cur_compact_index, uint8_t cur_config_index,
                                       const std::vector<_VoxelInfo>& compact_voxel_info,
-                                      const std::vector<voxel_index1D_type>& full_voxel_index_map,
+                                      // const std::vector<voxel_index1D_type>& full_voxel_index_map,
                                       const uint3& num_voxels_dim)
     {
         assert(compact_voxel_info[cur_compact_index].config() == config_2B_3B_lut[cur_config_index]);
         // Get the 3D coordinate of the current active voxel
+        voxel_index1D_type cur_index1D = compact_voxel_info[cur_compact_index].index1D();
         uint3 cur_index3D;
-        index1D_to_3D(compact_voxel_info[cur_compact_index].index1D(), num_voxels_dim, cur_index3D);
+        index1D_to_3D(cur_index1D, num_voxels_dim, cur_index3D);
         // Get the checking direction, or offset, according to 'cur_ambiguous_face'
         voxel_face_index_type cur_ambiguous_face = config_2B_3B_ambiguous_face[cur_config_index];
         CHECK_DIR dir = face_to_check_dir_lut[cur_ambiguous_face];
@@ -1100,7 +1151,9 @@ namespace dmc
         voxel_index1D_type index1D_to_check;
         index3D_to_1D(index3D_to_check, num_voxels_dim, index1D_to_check);
         
-        voxel_index1D_type adjc_compact_index_to_check = full_voxel_index_map[index1D_to_check];
+        // unsigned adjc_compact_index_to_check = full_voxel_index_map[index1D_to_check];
+        unsigned adjc_compact_index_to_check =
+                index1D_to_compact_index_lut(compact_voxel_info, index1D_to_check, cur_index1D, cur_compact_index);
         assert(adjc_compact_index_to_check != INVALID_INDEX_1D);
         
         uint8_t adj_config_index;
@@ -1119,7 +1172,7 @@ namespace dmc
     // result in non-manifold. Returns the actual number of vertices, including both iso-vertex and
     // intersection vertex between voxel bipolar edge and iso-surface.
     unsigned correct_voxels_info(std::vector<_VoxelInfo>& compact_voxel_info,
-                                 const std::vector<voxel_index1D_type>& full_voxel_index_map,
+                                 // const std::vector<voxel_index1D_type>& full_voxel_index_map,
                                  const uint3& num_voxels_dim)
     {
         for (unsigned compact_index = 0; compact_index < compact_voxel_info.size(); ++compact_index)
@@ -1132,9 +1185,9 @@ namespace dmc
                 continue;
             }
             
-            voxel_index1D_type adjacent_compact_index;
+            unsigned adjacent_compact_index;
             if (is_adjacent_ambiguous_config(adjacent_compact_index, compact_index, ambiguous_config_index,
-                                             compact_voxel_info, full_voxel_index_map, num_voxels_dim))
+                                             compact_voxel_info, /*full_voxel_index_map,*/ num_voxels_dim))
             {
                 compact_voxel_info[compact_index].encode_use_lut2(true);
                 compact_voxel_info[adjacent_compact_index].encode_use_lut2(true);
@@ -1303,10 +1356,14 @@ namespace dmc
     
     // Calculate the iso vertices positions in each voxel.
     void calc_iso_vertices(std::vector<float3>& compact_vertices, const std::vector<_VoxelInfo>& compact_voxel_info,
-                           const std::vector<voxel_index1D_type>& full_voxel_index_map, const uint3& num_voxels_dim)
+                           /*const std::vector<voxel_index1D_type>& full_voxel_index_map,*/
+                           const uint3& num_voxels_dim)
     {
-        for (const _VoxelInfo& vx_info : compact_voxel_info)
+        // for (const _VoxelInfo& vx_info : compact_voxel_info)
+        for (unsigned compact_index = 0; compact_index < compact_voxel_info.size(); ++compact_index)
         {
+            const _VoxelInfo& vx_info = compact_voxel_info[compact_index];
+            
             voxel_index1D_type index1D = vx_info.index1D();
             uint3 index3D;
             index1D_to_3D(index1D, num_voxels_dim, index3D);
@@ -1352,10 +1409,14 @@ namespace dmc
                     
                     index3D_to_1D(index3D.x + x_offset, index3D.y + y_offset, index3D.z + z_offset,
                                   num_voxels_dim.x, num_voxels_dim.y, belonged_index1D);
-                    assert(full_voxel_index_map[belonged_index1D] != INVALID_UINT32);
                 }
+                
+                unsigned belonged_compact_index =
+                        index1D_to_compact_index_lut(compact_voxel_info, belonged_index1D, index1D, compact_index);
+                assert(belonged_compact_index != INVALID_UINT32);
                 // Get the 'belonged_voxel' which manages 'belonged_edge'
-                const _VoxelInfo& belonged_vx_info = compact_voxel_info[full_voxel_index_map[belonged_index1D]];
+                // const _VoxelInfo& belonged_vx_info = compact_voxel_info[full_voxel_index_map[belonged_index1D]];
+                const _VoxelInfo& belonged_vx_info = compact_voxel_info[belonged_compact_index];
                 vertex_index_type edge_intersect_vertex_index = belonged_vx_info.edge_vertex_index(belonged_edge);
                 
                 vertex_index_type iso_vertex_index = vx_info.iso_vertex_index(iso_vertex_m);
@@ -1653,7 +1714,7 @@ namespace dmc
     void get_circular_vertices_by_edge(std::vector<vertex_index_type>& iso_vertex_indices,
                                        voxel_edge_index_type edge, const uint3& index3D, const _VoxelInfo& vx_info,
                                        const std::vector<_VoxelInfo>& compact_voxel_info,
-                                       const std::vector<voxel_index1D_type>& full_voxel_index_map,
+                                       // const std::vector<voxel_index1D_type>& full_voxel_index_map,
                                        const uint3& num_voxels_dim)
     {
         for (auto circular_edge_iter : CircularEdgeRange(edge, vx_info.is_edge_ccw(edge)))
@@ -1665,8 +1726,12 @@ namespace dmc
             voxel_index1D_type circular_index1D;
             index3D_to_1D(circular_index3D, num_voxels_dim, circular_index1D);
             
-            assert(full_voxel_index_map[circular_index1D] != INVALID_INDEX_1D);
-            const _VoxelInfo& circular_vx_info = compact_voxel_info[full_voxel_index_map[circular_index1D]];
+            // assert(full_voxel_index_map[circular_index1D] != INVALID_INDEX_1D);
+            // const _VoxelInfo& circular_vx_info = compact_voxel_info[full_voxel_index_map[circular_index1D]];
+            unsigned circular_compact_index = index1D_to_compact_index_lut(compact_voxel_info, circular_index1D);
+            assert(circular_compact_index != INVALID_INDEX_1D);
+            
+            const _VoxelInfo& circular_vx_info = compact_voxel_info[circular_compact_index];
             
             iso_vertex_m_type circular_iso_vertex_m = circular_vx_info.iso_vertex_m_by_edge(circular_edge);
             assert(circular_iso_vertex_m != NO_VERTEX);
@@ -1733,7 +1798,7 @@ namespace dmc
     
     void smooth_edge_vertices(std::vector<float3>& compact_vertices,
                               const std::vector<_VoxelInfo>& compact_voxel_info,
-                              const std::vector<voxel_index1D_type>& full_voxel_index_map,
+                              // const std::vector<voxel_index1D_type>& full_voxel_index_map,
                               const float3& xyz_min, const float3& xyz_max, const uint3& num_voxels_dim)
     {
         static const std::vector<voxel_edge_index_type> edges_vec = {6, 9, 10};
@@ -1756,7 +1821,7 @@ namespace dmc
                 
                 std::vector<vertex_index_type> iso_vertex_indices;
                 get_circular_vertices_by_edge(iso_vertex_indices, edge, index3D, vx_info,
-                                              compact_voxel_info, full_voxel_index_map, num_voxels_dim);
+                                              compact_voxel_info, /*full_voxel_index_map,*/ num_voxels_dim);
                 
                 std::vector<float2> projected_vertex_pos;
                 project_vertices_by_shared_edge(projected_vertex_pos, edge,
@@ -1826,7 +1891,7 @@ namespace dmc
     // Genreate the actual triangles information of the mesh.
     void generate_triangles(std::vector<uint3>& compact_triangles,
                             const std::vector<_VoxelInfo>& compact_voxel_info,
-                            const std::vector<voxel_index1D_type>& full_voxel_index_map,
+                            // const std::vector<voxel_index1D_type>& full_voxel_index_map,
                             const uint3& num_voxels_dim)
     {
         compact_triangles.clear();
@@ -1854,7 +1919,7 @@ namespace dmc
                 
                 std::vector<vertex_index_type> iso_vertex_indices;
                 get_circular_vertices_by_edge(iso_vertex_indices, edge, index3D, vx_info,
-                                              compact_voxel_info, full_voxel_index_map, num_voxels_dim);
+                                              compact_voxel_info, /*full_voxel_index_map,*/ num_voxels_dim);
                 
                 uint3 tri1 = make_uint3(iso_vertex_indices[0], iso_vertex_indices[1], iso_vertex_indices[2]);
                 uint3 tri2 = make_uint3(iso_vertex_indices[2], iso_vertex_indices[3], iso_vertex_indices[0]);
@@ -1877,27 +1942,29 @@ namespace dmc
         flag_active_voxels(voxel_flags, scalar_grid, iso_value);
         
         std::vector<_VoxelInfo> compact_voxel_info;
-        std::vector<voxel_index1D_type> full_voxel_index_map;
-        compact_voxel_flags(compact_voxel_info, full_voxel_index_map, voxel_flags);
+        // std::vector<voxel_index1D_type> full_voxel_index_map;
+        compact_voxel_flags(compact_voxel_info, /*full_voxel_index_map,*/ voxel_flags);
         
         init_voxels_info(compact_voxel_info, scalar_grid, iso_value);
-        unsigned num_total_vertices = correct_voxels_info(compact_voxel_info, full_voxel_index_map, num_voxels_dim);
+        // unsigned num_total_vertices = correct_voxels_info(compact_voxel_info,
+        //                                                   full_voxel_index_map, num_voxels_dim);
         
+        unsigned num_total_vertices = correct_voxels_info(compact_voxel_info, num_voxels_dim);
         compact_vertices.clear();
         compact_vertices.resize(num_total_vertices);
         sample_edge_intersection_vertices(compact_vertices, compact_voxel_info, scalar_grid,
                                           xyz_min, xyz_max, iso_value);
-        calc_iso_vertices(compact_vertices, compact_voxel_info, full_voxel_index_map, num_voxels_dim);
+        calc_iso_vertices(compact_vertices, compact_voxel_info, /*full_voxel_index_map,*/ num_voxels_dim);
         
         for (unsigned smooth_iter = 0; smooth_iter < num_smooth; ++smooth_iter)
         {
             std::cout << "smooth iter: " << smooth_iter << std::endl;
-            smooth_edge_vertices(compact_vertices, compact_voxel_info, full_voxel_index_map,
+            smooth_edge_vertices(compact_vertices, compact_voxel_info, // full_voxel_index_map,
                                  xyz_min, xyz_max, num_voxels_dim);
-            calc_iso_vertices(compact_vertices, compact_voxel_info, full_voxel_index_map, num_voxels_dim);
+            calc_iso_vertices(compact_vertices, compact_voxel_info, /*full_voxel_index_map,*/ num_voxels_dim);
         }
         
-        generate_triangles(compact_triangles, compact_voxel_info, full_voxel_index_map, num_voxels_dim);
+        generate_triangles(compact_triangles, compact_voxel_info, /*full_voxel_index_map,*/ num_voxels_dim);
     }
 }; // namespace dmc
 

@@ -59,7 +59,7 @@ namespace
         // Array3D<float> scalar_grid(resolution + 1, resolution + 1, resolution + 1);
         
         // Actually it's 400x296x320, downsample
-        unsigned i_resl(200), j_resl(148), k_resl(147);
+        unsigned i_resl(200), j_resl(148), k_resl(236/2);
         Array3D<float> scalar_grid(i_resl, j_resl, k_resl);
         
         {

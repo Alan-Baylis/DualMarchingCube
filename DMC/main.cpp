@@ -52,14 +52,14 @@ namespace
         // GyroidSurface surface;
         float3 xyz_min(0, 0, 0);
         float3 xyz_max(10, 10, 10);
-        float3 xyz_range = xyz_max - xyz_min;
+        // float3 xyz_range = xyz_max - xyz_min;
         float iso_value = 0.8f;
         
         // unsigned resolution = 3;
         // Array3D<float> scalar_grid(resolution + 1, resolution + 1, resolution + 1);
         
         // Actually it's 400x296x320, downsample
-        unsigned i_resl(200), j_resl(148), k_resl(160);
+        unsigned i_resl(200), j_resl(148), k_resl(147);
         Array3D<float> scalar_grid(i_resl, j_resl, k_resl);
         
         {
@@ -100,7 +100,7 @@ namespace
         */
         std::vector<float3> compact_vertices;
         std::vector<uint3> compact_triangles;
-        dmc::run_dmc(compact_vertices, compact_triangles, scalar_grid, xyz_min, xyz_max, iso_value, 30);
+        dmc::run_dmc(compact_vertices, compact_triangles, scalar_grid, xyz_min, xyz_max, iso_value, 16);
         for (const auto& vertex : compact_vertices)
         {
             std::cout << "v " << vertex.x << " " << vertex.y << " " << vertex.z << std::endl;

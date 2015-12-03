@@ -1825,7 +1825,6 @@ namespace dmc
 
     // Genreate the actual triangles information of the mesh.
     void generate_triangles(std::vector<uint3>& compact_triangles,
-                            const std::vector<float3>& compact_vertices,
                             const std::vector<_VoxelInfo>& compact_voxel_info,
                             const std::vector<voxel_index1D_type>& full_voxel_index_map,
                             const uint3& num_voxels_dim)
@@ -1898,8 +1897,7 @@ namespace dmc
             calc_iso_vertices(compact_vertices, compact_voxel_info, full_voxel_index_map, num_voxels_dim);
         }
         
-        generate_triangles(compact_triangles, compact_vertices, compact_voxel_info,
-                           full_voxel_index_map, num_voxels_dim);
+        generate_triangles(compact_triangles, compact_voxel_info, full_voxel_index_map, num_voxels_dim);
     }
 }; // namespace dmc
 

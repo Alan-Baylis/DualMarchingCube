@@ -48,42 +48,56 @@ namespace
         using namespace png_load;
         using namespace dmc;
         
-        // SphereSurface surface;
+        SphereSurface surface;
         // GyroidSurface surface;
-        float3 xyz_min(0, 0, 0);
-        float3 xyz_max(10, 10, 10);
-        // float3 xyz_range = xyz_max - xyz_min;
-        float iso_value = 0.8f;
+        float3 xyz_min(-5, -5, -5);
+        float3 xyz_max(5, 5, 5);
+        float3 xyz_range = xyz_max - xyz_min;
+        float iso_value = 4.0f;
         
-        // unsigned resolution = 3;
-        // Array3D<float> scalar_grid(resolution + 1, resolution + 1, resolution + 1);
-        
-        // Actually it's 400x296x320, downsample
-        unsigned i_resl(200), j_resl(148), k_resl(147);
-        Array3D<float> scalar_grid(i_resl, j_resl, k_resl);
-        
-        {
-            PngLoader loader("walnut_pngs/walnut_", k_resl);
-            std::vector<unsigned char> png_data;
-            
-            float grid_val;
-            for (unsigned slice_k = 0; slice_k < k_resl; ++slice_k)
-            {
-                png_data.clear();
-                loader.load(slice_k * 2, png_data);
-                
-                for (unsigned j = 0; j < j_resl; ++j)
-                {
-                    for (unsigned i = 0; i < i_resl; ++i)
-                    {
-                        grid_val = png_data[4 * j * i_resl + 2 * i] > 0 ? 1.0f : 0.0f;
-                        scalar_grid(i, j, slice_k) = grid_val;
-                    }
-                }
-                // std::cout << "done for slice " << slice_k << std::endl;
-            }
-        }
+        unsigned resolution = 20;
+        Array3D<float> scalar_grid(resolution + 1, resolution + 1, resolution + 1);
         /*
+         // Actually it's 400x296x320, downsample
+         unsigned i_resl(400), j_resl(296), k_resl(236);
+         Array3D<float> scalar_grid(i_resl, j_resl, k_resl);
+         
+         {
+         PngLoader loader("walnut_pngs/walnut_", k_resl);
+         std::vector<unsigned char> png_data;
+         
+         float grid_val;
+         for (unsigned slice_k = 0; slice_k < k_resl; ++slice_k)
+         {
+         
+         png_data.clear();
+         loader.load(slice_k * 2, png_data);
+         
+         for (unsigned j = 0; j < j_resl; ++j)
+         {
+         for (unsigned i = 0; i < i_resl; ++i)
+         {
+         grid_val = png_data[4 * j * i_resl + 2 * i] > 0 ? 1.0f : 0.0f;
+         scalar_grid(i, j, slice_k) = grid_val;
+         }
+         }
+         
+         png_data.clear();
+         loader.load(slice_k, png_data);
+         
+         for (unsigned j = 0; j < j_resl; ++j)
+         {
+         for (unsigned i = 0; i < i_resl; ++i)
+         {
+         grid_val = png_data[j * i_resl + i] > 0 ? 1.0f : 0.0f;
+         scalar_grid(i, j, slice_k) = grid_val;
+         }
+         }
+         // std::cout << "done for slice " << slice_k << std::endl;
+         }
+         }
+         */
+        
         for (unsigned k = 0; k < scalar_grid.dim_z(); ++k)
         {
             float z = ijk_to_xyz(k, resolution, xyz_range.z, xyz_min.z);
@@ -97,10 +111,10 @@ namespace
                 }
             }
         }
-        */
+        
         std::vector<float3> compact_vertices;
         std::vector<uint3> compact_triangles;
-        dmc::run_dmc(compact_vertices, compact_triangles, scalar_grid, xyz_min, xyz_max, iso_value, 16);
+        dmc::run_dmc(compact_vertices, compact_triangles, scalar_grid, xyz_min, xyz_max, iso_value, 15);
         for (const auto& vertex : compact_vertices)
         {
             std::cout << "v " << vertex.x << " " << vertex.y << " " << vertex.z << std::endl;

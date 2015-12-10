@@ -681,6 +681,8 @@ namespace dmc
         
         void set_num_vertices(uint8_t num) { m_num_vertices = num; }
         
+        uint8_t info() const { return m_info; }
+        
         uint8_t num_edge_vertices() const
         {
             uint8_t num = 0;
@@ -797,7 +799,18 @@ namespace dmc
         // of both 'info' and other 'LUT's. 8_bit is quite enough because each voxel will have
         // a maximum of 4 + 3 = 7 vertices. (4 for DMC iso-vertices, 3 for bipolar edge pts)
         uint8_t m_num_vertices = 0;
+        uint8_t m_align;
     };
+    
+    std::ostream& operator<<(std::ostream& os, const _VoxelInfo& vx_info)
+    {
+        os << "index1D: " << vx_info.index1D()
+        << " config: " << std::hex << (unsigned)vx_info.config() << std::dec
+        << " num_vertices: " << (unsigned)vx_info.num_vertices()
+        << " vertex_begin: " << vx_info.vertex_begin()
+        << " info: " << std::hex << (unsigned)vx_info.info() << std::dec;
+        return os;
+    }
     
     // Calculate a voxel's config mask.
     voxel_config_type voxel_config_mask(const float* voxel_vals, float iso_value)
@@ -873,8 +886,8 @@ namespace dmc
     bool is_edge_bipolar(float val0, float val1, float iso_value)
     {
         if (val0 == val1) return false;
-        else if (val0 > val1) return is_edge_bipolar(val1, val0, iso_value);
-        return !((val0 < iso_value && val1 < iso_value) || (val0 > iso_value && val1 > iso_value));
+        // else if (val0 > val1) return is_edge_bipolar(val1, val0, iso_value);
+        return !((val0 < iso_value && val1 < iso_value) || (val0 >= iso_value && val1 >= iso_value));
     }
     
     // Return an edge index given its two point indices
@@ -957,19 +970,19 @@ namespace dmc
             {
                 voxel_edge_index_type edge_index = pt_pair_edge_lut(p0, p1);
                 /*std::cout << "p0: " << (unsigned)p0 << ", p1: " << (unsigned)p1
-                << "val0: " << voxel_vals[p0] << ", val1: " << voxel_vals[p1] << std::endl;
-                */
+                << "val0: " << voxel_vals[p0] << ", val1: " << voxel_vals[p1] << std::endl;*/
+                
                 bool is_bipolar = is_edge_bipolar(voxel_vals[p0], voxel_vals[p1], iso_value);
                 if (is_bipolar)
                 {
-                    bool use_ccw = voxel_vals[p0] <= iso_value;
+                    bool use_ccw = voxel_vals[p0] < iso_value;
                     if (use_ccw)
                     {
                         assert(voxel_vals[p1] >= iso_value);
                     }
                     else
                     {
-                        assert(voxel_vals[p1] <= iso_value);
+                        assert(voxel_vals[p1] < iso_value);
                     }
                     // assert(use_ccw ? voxel_vals[p1] >= iso_value : voxel_vals[p1] <= iso_value);
 
@@ -1136,6 +1149,7 @@ namespace dmc
             if (is_adjacent_ambiguous_config(adjacent_compact_index, compact_index, ambiguous_config_index,
                                              compact_voxel_info, full_voxel_index_map, num_voxels_dim))
             {
+                std::cout << "compact_index " << compact_index << " uses lut2!" << std::endl;
                 compact_voxel_info[compact_index].encode_use_lut2(true);
                 compact_voxel_info[adjacent_compact_index].encode_use_lut2(true);
             }
@@ -1864,6 +1878,12 @@ namespace dmc
         }
     }
     
+    std::ostream& operator<<(std::ostream& os, const utils::float3& t)
+    {
+        os << t.x << " " << t.y << " " << t.z;
+        return os;
+    }
+    
     void run_dmc(std::vector<float3>& compact_vertices, std::vector<uint3>& compact_triangles,
                  const scalar_grid_type& scalar_grid, const float3& xyz_min, const float3& xyz_max, float iso_value,
                  unsigned num_smooth = 0)
@@ -1888,6 +1908,7 @@ namespace dmc
         sample_edge_intersection_vertices(compact_vertices, compact_voxel_info, scalar_grid,
                                           xyz_min, xyz_max, iso_value);
         calc_iso_vertices(compact_vertices, compact_voxel_info, full_voxel_index_map, num_voxels_dim);
+        
         
         for (unsigned smooth_iter = 0; smooth_iter < num_smooth; ++smooth_iter)
         {
